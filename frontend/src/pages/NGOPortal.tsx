@@ -481,7 +481,7 @@ export const NGOPortal: React.FC<{ path: string }> = ({ path }) => {
           {browseView === 'map' && (
             <DonationsMap
               donations={filteredDonations}
-              onClaimClick={(donation) => setSelectedDonation(donation)}
+              onClaimClick={(donation) => setSelectedDonation(donation as any)}
             />
           )}
 
