@@ -1,7 +1,12 @@
 import axios from 'axios';
 
+let rawApiUrl = import.meta.env.VITE_API_URL;
+if (rawApiUrl && !rawApiUrl.endsWith('/api/v1') && !rawApiUrl.endsWith('/api/v1/')) {
+  rawApiUrl = rawApiUrl.endsWith('/') ? `${rawApiUrl}api/v1` : `${rawApiUrl}/api/v1`;
+}
+
 export const API_URL =
-  import.meta.env.VITE_API_URL ||
+  rawApiUrl ||
   (import.meta.env.DEV ? 'http://localhost:8000/api/v1' : '/api/v1');
 
 export const API_ORIGIN = API_URL.replace(/\/api\/v1\/?$/, '');
