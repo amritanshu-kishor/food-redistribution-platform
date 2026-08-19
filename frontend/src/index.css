@@ -1,0 +1,96 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-ivory: #F4EDE1;
+  --color-brand-charcoal: #1C1712;
+  --color-brand-stone: #EFE4D4;
+  --color-brand-stone-dark: #D9C8B0;
+  --color-brand-stone-light: #FBF6EE;
+  --color-brand-green: #1F4D3A;
+  --color-brand-green-light: #D7E6DC;
+  --color-brand-green-dark: #143328;
+  --color-brand-sage: #8BA888;
+  --color-brand-amber: #C45C26;
+  --color-brand-red: #B42318;
+  --color-brand-blue: #2F6F7A;
+  --color-brand-gold: #C9A227;
+  --color-brand-pine: #0F2E24;
+  
+  --font-serif: "Fraunces", Georgia, serif;
+  --font-sans: "Outfit", Inter, sans-serif;
+  --font-display: "Fraunces", Georgia, serif;
+}
+
+@utility btn-tactile {
+  @apply px-4 py-2 bg-brand-charcoal text-brand-ivory font-medium rounded-full border border-brand-charcoal shadow-sm hover:bg-brand-pine hover:shadow-md active:translate-y-[1px] transition-all duration-150 ease-in-out cursor-pointer;
+}
+
+@utility btn-tactile-secondary {
+  @apply px-4 py-2 bg-transparent text-brand-charcoal font-medium rounded-full border border-brand-stone-dark shadow-sm hover:bg-white hover:border-brand-charcoal active:translate-y-[1px] transition-all duration-150 ease-in-out cursor-pointer;
+}
+
+@utility btn-tactile-green {
+  @apply px-4 py-2 bg-brand-amber text-white font-medium rounded-full border border-brand-amber shadow-sm hover:bg-[#a94b1c] active:translate-y-[1px] transition-all duration-150 ease-in-out cursor-pointer;
+}
+
+@utility btn-tactile-red {
+  @apply px-4 py-2 bg-brand-red text-white font-medium rounded-full border border-brand-red shadow-sm hover:bg-brand-red/90 active:translate-y-[1px] transition-all duration-150 ease-in-out cursor-pointer;
+}
+
+@utility card-tactile {
+  @apply bg-white/80 backdrop-blur-sm border border-white/70 rounded-3xl p-6 shadow-[0_18px_40px_-28px_rgba(28,23,18,0.45)] hover:shadow-[0_22px_50px_-24px_rgba(28,23,18,0.5)] transition-all duration-300;
+}
+
+@utility glass-tactile {
+  @apply bg-white/70 backdrop-blur-md border border-white/50 shadow-sm;
+}
+
+@utility input-tactile {
+  @apply w-full px-3 py-2.5 bg-white/90 border border-brand-stone-dark rounded-2xl text-brand-charcoal placeholder-brand-stone-dark/90 focus:outline-none focus:border-brand-amber focus:ring-4 focus:ring-brand-amber/10 transition duration-200;
+}
+
+body {
+  @apply bg-brand-ivory text-brand-charcoal font-sans antialiased selection:bg-brand-amber/20 selection:text-brand-charcoal;
+  background-image:
+    radial-gradient(1200px 500px at 10% -10%, rgba(196, 92, 38, 0.08), transparent 50%),
+    radial-gradient(900px 420px at 110% 0%, rgba(31, 77, 58, 0.1), transparent 46%),
+    radial-gradient(rgba(28, 23, 18, 0.035) 1px, transparent 0);
+  background-size: auto, auto, 22px 22px;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  @apply font-display text-brand-charcoal tracking-tight font-semibold;
+}
+
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-brand-stone-dark rounded-full;
+}
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-brand-sage;
+}
+
+@keyframes urgency-glow {
+  0% { box-shadow: 0 0 0 0 rgba(196, 92, 38, 0.4); }
+  70% { box-shadow: 0 0 0 8px rgba(196, 92, 38, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(196, 92, 38, 0); }
+}
+
+.animate-urgency-glow {
+  animation: urgency-glow 2s infinite;
+}
+
+@keyframes float-slow {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+
+.animate-float {
+  animation: float-slow 7s ease-in-out infinite;
+}
