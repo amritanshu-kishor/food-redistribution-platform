@@ -4,11 +4,11 @@ FoodShare is a production-ready web application designed to connect restaurants 
 
 ---
 
-## 🌟 The Three Platform Modes (Roles)
+## The Three Platform Modes (Roles)
 
 FoodShare provides specialized interfaces and custom user experiences for three distinct roles:
 
-### 1. 🏪 Restaurant Portal (Donor Mode)
+### 1. Restaurant Portal (Donor Mode)
 Designed for food businesses to list, track, and verify surplus food donations.
 *   **Donation Creation & Management**: Create, edit, and delete listings specifying categories (e.g., Prepared Meals, Baked Goods, Fresh Produce), quantity/unit, preparation/expiry times, pickup windows, precise coordinates (interactive map picker), and photo uploads.
 *   **Claim Requests Management**: View, approve, or reject incoming real-time donation requests from nearby NGOs.
@@ -16,7 +16,7 @@ Designed for food businesses to list, track, and verify surplus food donations.
 *   **Verification Uploads**: Upload corporate registrations or business license documents for platform verification.
 *   **Analytics Dashboard**: View analytics on total meals saved, active listings, and distributions via custom interactive SVG charts.
 
-### 2. 🤝 NGO Portal (Receiver Mode)
+### 2. NGO Portal (Receiver Mode)
 Designed for non-profit organizations to claim, manage, and verify food distribution.
 *   **Browse Listings**: Browse active donations via an interactive map or a listing grid. Filter by category, keyword search, or maximum radius distance (with automatic browser geolocation support).
 *   **Claiming System**: Claim required quantities of food, with automated race-condition protection to prevent double-claiming. Includes critical allergy warnings and food safety instructions.
@@ -24,7 +24,7 @@ Designed for non-profit organizations to claim, manage, and verify food distribu
 *   **Organization Verification**: Upload tax exemption (e.g., Section 80G/501(c)(3)) and NGO registration documents.
 *   **Impact Analytics**: Track total claims, completed distribution logs, and total meals received.
 
-### 3. 🛡️ Administrative Console (Admin Mode)
+### 3. Administrative Console (Admin Mode)
 Designed for platform owners to moderate users, audit logs, and oversee operations.
 *   **Verification Portal**: Review registration documents uploaded by Restaurants and NGOs, and approve or reject their access.
 *   **User Management**: View all users; suspend, activate, or reactivate accounts.
@@ -34,9 +34,9 @@ Designed for platform owners to moderate users, audit logs, and oversee operatio
 
 ---
 
-## 🚀 How to Launch the Platform
+## How to Launch the Platform
 
-### 📋 Prerequisites
+### Prerequisites
 Ensure you have the following installed on your machine:
 *   [Node.js](https://nodejs.org/) (v18 or higher)
 *   [Python](https://www.python.org/) (v3.10 or higher)
@@ -44,7 +44,7 @@ Ensure you have the following installed on your machine:
 
 ---
 
-### 🔧 Installation & Setup
+### Installation & Setup
 
 1.  **Clone the Repository**:
     ```bash
@@ -72,7 +72,7 @@ Ensure you have the following installed on your machine:
 
 ---
 
-### 🗄️ Database Setup & Migrations
+### Database Setup & Migrations
 
 The database schemas can be built either automatically or manually using migrations:
 
@@ -91,7 +91,7 @@ The database schemas can be built either automatically or manually using migrati
 
 ---
 
-### 🖥️ Running the Application
+### Running the Application
 
 You can launch the frontend and backend concurrently using the root package runner, or start them individually in separate terminals.
 
@@ -116,7 +116,7 @@ npm run dev
 
 ---
 
-## 🔑 Default Login Credentials (Seeded Data)
+## Default Login Credentials (Seeded Data)
 
 If you ran the seed script (`python backend/seed.py`), you can log in with the following default accounts:
 
