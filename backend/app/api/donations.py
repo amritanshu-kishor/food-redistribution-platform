@@ -2,16 +2,15 @@ import math
 from datetime import datetime
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query
-from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.api.deps import get_current_active_user, get_current_restaurant
 from app.crud.crud import (
-    create_donation, update_donation, auto_expire_donations, calculate_remaining_quantity,
+    create_donation, update_donation, auto_expire_donations, calculate_remaining_available_quantity,
     create_audit_log
 )
-from app.models.models import Donation, DonationStatus, User, UserRole, Organization
+from app.models.models import Donation, DonationStatus, User, UserRole
 from app.schemas.schemas import DonationCreate, DonationUpdate, DonationOut
 from app.utils.storage import save_uploaded_file
 
@@ -38,6 +37,8 @@ def create_new_donation(
     current_user: User = Depends(get_current_restaurant)
 ):
     """Post a new food donation listing (Restaurant only)."""
+    if not current_user.organization:
+        raise HTTPException(status_code=403, detail="A verified organization is required")
     return create_donation(db, donation_in, current_user.organization.id)
 
 @router.put("/{donation_id}", response_model=DonationOut)
@@ -62,7 +63,7 @@ def upload_donation_image(
     if not donation:
         raise HTTPException(status_code=404, detail="Donation not found")
         
-    if donation.donor_id != current_user.organization.id:
+    if not current_user.organization or donation.donor_id != current_user.organization.id:
         raise HTTPException(status_code=403, detail="Not authorized to modify this donation")
         
     image_url = save_uploaded_file(file, is_image=True)
@@ -92,17 +93,18 @@ def get_my_listings(
     # Add helper fields
     for d in donations:
         d.donor_name = d.donor.name
+        d.available_quantity = calculate_remaining_available_quantity(d)
     return donations
 
 @router.get("/browse", response_model=List[DonationOut])
 def browse_donations(
     category: Optional[str] = Query(None),
-    min_qty: Optional[float] = Query(None),
-    max_distance_km: Optional[float] = Query(None),
-    user_lat: Optional[float] = Query(None),
-    user_lon: Optional[float] = Query(None),
+    min_qty: Optional[float] = Query(None, ge=0, allow_inf_nan=False),
+    max_distance_km: Optional[float] = Query(None, ge=0, allow_inf_nan=False),
+    user_lat: Optional[float] = Query(None, ge=-90, le=90),
+    user_lon: Optional[float] = Query(None, ge=-180, le=180),
     skip: int = Query(0, ge=0),
-    limit: int = Query(10, ge=1),
+    limit: int = Query(10, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -125,7 +127,7 @@ def browse_donations(
     filtered_donations = []
     for d in donations:
         # Calculate remaining quantity
-        rem = calculate_remaining_quantity(d)
+        rem = calculate_remaining_available_quantity(d)
         if rem <= 0:
             continue  # Don't show fully allocated donations
             
@@ -145,6 +147,7 @@ def browse_donations(
                 continue
                 
         # Cache calculated distance or attribute on object if needed
+        d.available_quantity = rem
         filtered_donations.append(d)
         
     # If coordinates are provided, sort results by distance
@@ -164,5 +167,18 @@ def get_donation_details(
     donation = db.query(Donation).filter(Donation.id == donation_id).first()
     if not donation:
         raise HTTPException(status_code=404, detail="Donation not found")
+    is_admin = current_user.role == UserRole.ADMIN
+    owns_donation = current_user.organization and donation.donor_id == current_user.organization.id
+    is_public = donation.status in {
+        DonationStatus.AVAILABLE,
+        DonationStatus.REQUESTED,
+        DonationStatus.ACCEPTED,
+        DonationStatus.PICKUP_PENDING,
+        DonationStatus.PICKED_UP,
+        DonationStatus.COMPLETED,
+    }
+    if not is_admin and not owns_donation and not is_public:
+        raise HTTPException(status_code=404, detail="Donation not found")
     donation.donor_name = donation.donor.name
+    donation.available_quantity = calculate_remaining_available_quantity(donation)
     return donation

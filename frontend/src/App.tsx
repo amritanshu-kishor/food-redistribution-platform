@@ -1,17 +1,23 @@
-import React from 'react';
+import React, { lazy, Suspense, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { NotificationProvider } from './context/NotificationContext';
 import { useCurrentPath, navigateTo } from './services/router';
-import { Landing } from './pages/Landing';
-import { Login } from './pages/Login';
-import { Register } from './pages/Register';
-import { RestaurantPortal } from './pages/RestaurantPortal';
-import { NGOPortal } from './pages/NGOPortal';
-import { AdminPortal } from './pages/AdminPortal';
+const Landing = lazy(() => import('./pages/Landing').then((module) => ({ default: module.Landing })));
+const Login = lazy(() => import('./pages/Login').then((module) => ({ default: module.Login })));
+const Register = lazy(() => import('./pages/Register').then((module) => ({ default: module.Register })));
+const RestaurantPortal = lazy(() => import('./pages/RestaurantPortal').then((module) => ({ default: module.RestaurantPortal })));
+const NGOPortal = lazy(() => import('./pages/NGOPortal').then((module) => ({ default: module.NGOPortal })));
+const AdminPortal = lazy(() => import('./pages/AdminPortal').then((module) => ({ default: module.AdminPortal })));
 
 const AppContent: React.FC = () => {
   const currentPath = useCurrentPath();
   const { user, loading } = useAuth();
+
+  useEffect(() => {
+    if (!loading && !user && currentPath !== '/' && currentPath !== '/login' && currentPath !== '/register') {
+      navigateTo('/login');
+    }
+  }, [currentPath, loading, user]);
 
   if (loading) {
     return (
@@ -41,8 +47,6 @@ const AppContent: React.FC = () => {
 
   // Security Access Guard: Logged out users are forced to authenticate
   if (!user) {
-    // Prevent infinite redirect loop if already going to login
-    setTimeout(() => navigateTo('/login'), 50);
     return null;
   }
 
@@ -95,7 +99,9 @@ export default function App() {
   return (
     <AuthProvider>
       <NotificationProvider>
-        <AppContent />
+        <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-xs font-semibold text-brand-charcoal/60">Loading Harvest Link…</div>}>
+          <AppContent />
+        </Suspense>
       </NotificationProvider>
     </AuthProvider>
   );

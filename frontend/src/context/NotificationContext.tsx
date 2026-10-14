@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { api } from '../services/api';
 import { useAuth } from './AuthContext';
 
@@ -26,15 +26,14 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const { user } = useAuth();
   const pollingRef = useRef<any>(null);
 
-  const fetchNotifications = async () => {
+  const fetchNotifications = useCallback(async () => {
     if (!user) return;
     try {
       const response = await api.get('/notifications/');
       setNotifications(response.data);
-    } catch (error) {
-      console.error('Failed to fetch notifications:', error);
+    } catch {
     }
-  };
+  }, [user]);
 
   const markAsRead = async (id: number) => {
     try {
@@ -42,8 +41,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       setNotifications((prev) =>
         prev.map((n) => (n.id === id ? { ...n, is_read: true } : n))
       );
-    } catch (error) {
-      console.error('Failed to mark notification as read:', error);
+    } catch {
     }
   };
 
@@ -51,8 +49,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     try {
       await api.put('/notifications/read');
       setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
-    } catch (error) {
-      console.error('Failed to mark all notifications as read:', error);
+    } catch {
     }
   };
 
@@ -73,7 +70,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         clearInterval(pollingRef.current);
       }
     };
-  }, [user]);
+  }, [user, fetchNotifications]);
 
   const unreadCount = notifications.filter((n) => !n.is_read).length;
 

@@ -31,6 +31,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, activePath }) => {
           { name: 'Active Listing', path: '/restaurant/donations', icon: <Search className="w-4 h-4" /> },
           { name: 'Claim History', path: '/restaurant/history', icon: <History className="w-4 h-4" /> },
           { name: 'Impact Analytics', path: '/restaurant/analytics', icon: <BarChart3 className="w-4 h-4" /> },
+          { name: 'Profile & Documents', path: '/restaurant/profile', icon: <UserIcon className="w-4 h-4" /> },
         ];
       case 'ngo':
         return [
@@ -39,6 +40,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, activePath }) => {
           { name: 'My Claims', path: '/ngo/claims', icon: <PlusCircle className="w-4 h-4" /> },
           { name: 'Donation History', path: '/ngo/history', icon: <History className="w-4 h-4" /> },
           { name: 'Impact Analytics', path: '/ngo/analytics', icon: <BarChart3 className="w-4 h-4" /> },
+          { name: 'Profile & Documents', path: '/ngo/profile', icon: <UserIcon className="w-4 h-4" /> },
         ];
       case 'admin':
         return [
@@ -63,7 +65,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, activePath }) => {
           <AlertCircle className="w-4 h-4 flex-shrink-0" />
           <span>
             Your account is <strong>pending verification</strong>. An admin must approve your organisation before you can post or claim food.
-            Log in as <strong>admin@foodshare.io</strong> and open Verifications.
+             An administrator will review your organization details and documents.
           </span>
         </div>
       );
@@ -125,6 +127,25 @@ export const Layout: React.FC<LayoutProps> = ({ children, activePath }) => {
       </header>
 
       {renderStatusBanner()}
+
+      <nav aria-label="Mobile navigation" className="md:hidden flex gap-2 overflow-x-auto px-4 py-3 border-b border-brand-stone-dark/40 bg-brand-ivory/80">
+        {links.map((link) => (
+          <button
+            key={link.path}
+            type="button"
+            onClick={() => navigateTo(link.path)}
+            aria-current={activePath === link.path ? 'page' : undefined}
+            className={`flex items-center gap-2 whitespace-nowrap px-3 py-2 rounded-full text-xs font-semibold cursor-pointer ${
+              activePath === link.path
+                ? 'bg-brand-amber text-white'
+                : 'bg-white/70 text-brand-charcoal/75 border border-brand-stone-dark/50'
+            }`}
+          >
+            {link.icon}
+            {link.name}
+          </button>
+        ))}
+      </nav>
 
       <div className="flex-1 flex">
         <aside className="w-64 m-4 mr-0 rounded-[1.8rem] bg-brand-pine text-brand-ivory p-5 hidden md:flex flex-col gap-6">

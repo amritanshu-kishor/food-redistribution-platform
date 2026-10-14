@@ -1,8 +1,12 @@
 import os
 import uuid
 import shutil
+import logging
+from pathlib import Path
 from fastapi import UploadFile, HTTPException, status
 from app.core.config import settings
+
+logger = logging.getLogger("foodshare.storage")
 
 # Create upload directories locally if local storage is configured
 if settings.STORAGE_PROVIDER == "local":
@@ -27,7 +31,8 @@ def validate_file(file: UploadFile, is_image: bool = False) -> int:
         )
         
     # Extensions and content types
-    ext = os.path.splitext(file.filename)[1].lower()
+    filename = file.filename or ""
+    ext = os.path.splitext(filename)[1].lower()
     if is_image:
         allowed_exts = {".jpg", ".jpeg", ".png", ".webp"}
         allowed_types = {"image/jpeg", "image/png", "image/webp"}
@@ -46,18 +51,38 @@ def validate_file(file: UploadFile, is_image: bool = False) -> int:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"File type {ext} not allowed."
         )
+
+    # Content-Type and extension are client-controlled. Verify common magic
+    # bytes too, and reject formats that could be served as active content.
+    header = file.file.read(16)
+    file.file.seek(0)
+    signatures = {
+        ".pdf": header.startswith(b"%PDF"),
+        ".jpg": header.startswith(b"\xff\xd8\xff"),
+        ".jpeg": header.startswith(b"\xff\xd8\xff"),
+        ".png": header.startswith(b"\x89PNG\r\n\x1a\n"),
+        ".webp": header.startswith(b"RIFF") and header[8:12] == b"WEBP",
+        ".doc": header.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"),
+        ".docx": header.startswith(b"PK\x03\x04"),
+    }
+    if not signatures.get(ext, False):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File contents do not match the declared file type")
     return file_size
 
 def save_uploaded_file(file: UploadFile, is_image: bool = False) -> str:
     """Save uploaded file to S3 or local directory, returning path/URL."""
     validate_file(file, is_image)
     
-    unique_filename = f"{uuid.uuid4()}{os.path.splitext(file.filename)[1]}"
+    filename = file.filename or "upload"
+    unique_filename = f"{uuid.uuid4().hex}{os.path.splitext(filename)[1].lower()}"
     subfolder = "images" if is_image else "documents"
     
     if settings.STORAGE_PROVIDER == "local":
-        file_path = os.path.join(settings.UPLOAD_DIR, subfolder, unique_filename)
-        with open(file_path, "wb") as buffer:
+        base_dir = Path(settings.UPLOAD_DIR).resolve()
+        file_path = (base_dir / subfolder / unique_filename).resolve()
+        if base_dir not in file_path.parents:
+            raise HTTPException(status_code=400, detail="Invalid upload path")
+        with file_path.open("wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         return f"/uploads/{subfolder}/{unique_filename}"
     else:
@@ -84,10 +109,11 @@ def save_uploaded_file(file: UploadFile, is_image: bool = False) -> str:
                 ExtraArgs={"ContentType": file.content_type}
             )
             return f"https://{settings.AWS_S3_BUCKET_NAME}.s3.{settings.AWS_REGION}.amazonaws.com/{s3_key}"
-        except Exception as e:
+        except Exception:
+            logger.exception("S3 upload failed")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to upload file to S3: {str(e)}"
+                detail="Failed to upload file to storage"
             )
 
 def delete_uploaded_file(file_path: str) -> bool:
@@ -97,10 +123,11 @@ def delete_uploaded_file(file_path: str) -> bool:
         
     if settings.STORAGE_PROVIDER == "local":
         if file_path.startswith("/uploads/"):
-            relative_path = file_path.replace("/uploads/", "")
-            local_path = os.path.join(settings.UPLOAD_DIR, relative_path)
-            if os.path.exists(local_path):
-                os.remove(local_path)
+            relative_path = file_path.removeprefix("/uploads/")
+            base_dir = Path(settings.UPLOAD_DIR).resolve()
+            local_path = (base_dir / relative_path).resolve()
+            if base_dir in local_path.parents and local_path.is_file():
+                local_path.unlink()
                 return True
     else:
         try:
@@ -123,3 +150,14 @@ def delete_uploaded_file(file_path: str) -> bool:
             except Exception:
                 return False
     return False
+
+
+def resolve_private_local_file(file_path: str) -> Path:
+    """Resolve a document path while preventing traversal outside UPLOAD_DIR."""
+    if not file_path.startswith("/uploads/documents/"):
+        raise HTTPException(status_code=404, detail="Document not found")
+    base_dir = Path(settings.UPLOAD_DIR).resolve()
+    candidate = (base_dir / file_path.removeprefix("/uploads/")).resolve()
+    if base_dir not in candidate.parents or not candidate.is_file():
+        raise HTTPException(status_code=404, detail="Document not found")
+    return candidate

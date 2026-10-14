@@ -1,24 +1,9 @@
-# Production Checklist - Food Redistribution Platform
+# Release verification status
 
-This checklist tracks the implementation and verification status of all required platform features.
+**Release blocked.** A passing build is not production acceptance.
 
-- `[DONE ]` Architecture/Setup
-- `[DONE ]` Database/Migrations
-- `[DONE ]` Authentication
-- `[DONE ]` Roles (Admin, Restaurant, NGO)
-- `[DONE ]` Restaurant Portal
-- `[DONE ]` NGO Portal
-- `[ ]` Admin Portal
-- `[DONE ]` Donation Lifecycle State Transitions
-- `[DONE ]` Allocation Logic & Race-Condition Protection
-- `[ ]` Expiry Enforcement
-- `[DONE ]` Location Setup
-- `[ ]` QR Code Verification
-- `[ ]` Notifications & In-App Alerts
-- `[ ]` Analytics & Reports (PDF/CSV)
-- `[ ]` Audit Logging & System Security
-- `[DONE ]` Frontend Editorial Design
-- `[ ]` Automated & Manual Testing
-- `[ ]` Production Integrations
-- `[ ]` Deployment Settings
-- `[ ]` Final System Verification
+Verified so far: frontend TypeScript/build, six backend tests, dependency advisory checks, fresh SQLite migrations, local HTTP startup, browser workflows, and CSP fix/dev server verification. 
+
+Still needing verification: PostgreSQL concurrent claims, existing-database upgrades, SMTP/S3 integration, accessibility, production headers, and the remaining security boundaries. Final cleanup and post-cleanup acceptance remain pending.
+
+See `ARCHITECTURE.md` and `graphify-out/graph.json` for the current system map.

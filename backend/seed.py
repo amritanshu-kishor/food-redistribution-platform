@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 sys.path.insert(0, os.path.dirname(__file__))
 
 from app.core.database import Base, engine, SessionLocal
+from app.core.config import settings
 from app.core.security import get_password_hash
 from app.models.models import (
     AllocationStatus,
@@ -33,8 +34,9 @@ from app.models.models import (
     UserStatus,
 )
 
-DEMO_PASSWORD = "Demo@1234"
-ADMIN_PASSWORD = "Admin@1234"
+DEMO_PASSWORD = os.environ.get("DEMO_PASSWORD", "")
+ADMIN_EMAIL = settings.ADMIN_EMAIL
+ADMIN_PASSWORD = settings.ADMIN_PASSWORD
 
 
 def wipe_demo(db):
@@ -129,6 +131,17 @@ def make_allocation(db, donation, ngo, qty, status, days_ago=0):
 
 
 def seed():
+    if settings.ENV.lower() in {"production", "staging"}:
+        raise RuntimeError("The demo seed is disabled in production and staging")
+    if not ADMIN_EMAIL or not ADMIN_PASSWORD or not DEMO_PASSWORD:
+        raise RuntimeError("ADMIN_EMAIL, ADMIN_PASSWORD, and DEMO_PASSWORD must be supplied to seed demo data")
+    if (
+        len(ADMIN_PASSWORD) < 12
+        or len(DEMO_PASSWORD) < 12
+        or len(ADMIN_PASSWORD.encode("utf-8")) > 72
+        or len(DEMO_PASSWORD.encode("utf-8")) > 72
+    ):
+        raise RuntimeError("Seed passwords must be between 12 characters and 72 UTF-8 bytes")
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
@@ -137,7 +150,7 @@ def seed():
 
         admin = make_user(
             db,
-            "admin@foodshare.io",
+            ADMIN_EMAIL,
             "Platform Administrator",
             "+91-9000000000",
             UserRole.ADMIN,
@@ -362,8 +375,8 @@ def seed():
         print("  In-flight claim: Tonight's Extra Rotis")
 
         db.commit()
-        print("\nSeed complete. Demo logins (password Demo@1234 unless noted):")
-        print("  ADMIN     admin@foodshare.io / Admin@1234")
+        print("\nSeed complete. Passwords were supplied through the environment and are not printed.")
+        print(f"  ADMIN     {ADMIN_EMAIL}")
         print("  High donor restaurants:")
         print("    contact@spicegarden.com")
         print("    hello@goldenladle.com")
@@ -382,9 +395,9 @@ def seed():
         print("    pending.kitchen@foodshare.io")
         print("    pending.ngo@foodshare.io")
         print("  Verify them as admin -> Verifications -> Approve Partner")
-    except Exception as e:
+    except Exception:
         db.rollback()
-        print(f"Seed failed: {e}")
+        print("Seed failed; database changes were rolled back.")
         raise
     finally:
         db.close()

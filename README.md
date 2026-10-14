@@ -61,7 +61,8 @@ Ensure you have the following installed on your machine:
         # Or for SQLite:
         # DATABASE_URL=sqlite:///./food_redist.db
         ```
-    *   Configure `JWT_SECRET_KEY` and other credentials inside `.env` as required.
+    *   Configure strong `JWT_SECRET_KEY` and `JWT_REFRESH_SECRET_KEY` values inside `.env` as required. In production, each must be at least 32 characters.
+    *   Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in the deployment secret store, then run `python backend/bootstrap_admin.py` once. Public registration only creates restaurant and NGO accounts.
 
 3.  **Install Dependencies**:
     The root `package.json` contains a script to automatically install both frontend and backend packages:
@@ -83,8 +84,8 @@ The database schemas can be built either automatically or manually using migrati
     alembic upgrade head
     cd ..
     ```
-*   **Seed Sample Demo Data**:
-    To pre-populate the database with test profiles, listings, and dummy logs, run the database seed script:
+*   **Seed Sample Demo Data (development only)**:
+    To pre-populate a development database with test profiles, listings, and dummy logs, set `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and a private `DEMO_PASSWORD` in your local environment, then run:
     ```bash
     python backend/seed.py
     ```
@@ -112,18 +113,22 @@ npm run dev
     ```bash
     npm run dev:frontend
     ```
-    *(Equivalent to running `npm run dev --prefix frontend`)*
+     *(Equivalent to running `npm run dev --prefix frontend`)*
+
+### Production build and startup
+
+Run migrations before starting the API:
+
+```bash
+npm run migrate
+npm run bootstrap:admin
+npm run build
+cd backend && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+Serve `frontend/dist` from the production web server. Configure HTTPS and the
+same explicit frontend origin in `CORS_ORIGINS` before exposing the API.
 
 ---
 
-## Default Login Credentials (Seeded Data)
-
-If you ran the seed script (`python backend/seed.py`), you can log in with the following default accounts:
-
-*   **Platform Administrator**:
-    *   **Email**: `admin@foodshare.io`
-    *   **Password**: `Admin@1234`
-*   **Restaurant / NGO Accounts**:
-    *   **Password for all seed accounts**: `Demo@1234`
-    *   **Sample Restaurant Email**: `contact@spicegarden.com`
-    *   **Sample NGO Email**: `hope.foundation@ngo.org` (or check `backend/seed.py` for other seeded accounts)
+The seed script never prints or stores a default password. Use the values supplied through your local environment when running it, and never reuse them in production.

@@ -236,18 +236,15 @@ export const DonutChart: React.FC<{ data: ChartDataPoint[] }> = ({ data }) => {
   
   const colorsList = ['#2D5A27', '#8FBC8F', '#A3B18A', '#4A7A44', '#1C3B18'];
   
-  let accumulatedAngle = 0;
-  
   const segments = data.map((d, idx) => {
     const percentage = total > 0 ? d.value / total : 0;
-    const strokeDasharray = `${percentage * circumference} ${circumference}`;
-    const strokeDashoffset = -accumulatedAngle * circumference;
-    accumulatedAngle += percentage;
-    
+    const accumulatedAngle = data
+      .slice(0, idx)
+      .reduce((sum, item) => sum + (total > 0 ? item.value / total : 0), 0);
     return {
       ...d,
-      strokeDasharray,
-      strokeDashoffset,
+      strokeDasharray: `${percentage * circumference} ${circumference}`,
+      strokeDashoffset: -accumulatedAngle * circumference,
       color: colorsList[idx % colorsList.length]
     };
   });

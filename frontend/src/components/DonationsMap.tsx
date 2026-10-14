@@ -35,15 +35,26 @@ function getUrgencyColor(expiresAt: string): string {
   return '#22c55e';
 }
 
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>'"]/g, (character) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    "'": '&#39;',
+    '"': '&quot;',
+  })[character] ?? character);
+}
+
 export const DonationsMap: React.FC<DonationsMapProps> = ({ donations, onClaimClick }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const markersRef = useRef<L.Marker[]>([]);
+  const initialDonationsRef = useRef(donations);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
-    const withCoords = donations.filter(d => d.latitude && d.longitude);
+    const withCoords = initialDonationsRef.current.filter(d => d.latitude != null && d.longitude != null);
     const centerLat = withCoords.length > 0 ? withCoords[0].latitude! : 20.5937;
     const centerLon = withCoords.length > 0 ? withCoords[0].longitude! : 78.9629;
 
@@ -74,7 +85,7 @@ export const DonationsMap: React.FC<DonationsMapProps> = ({ donations, onClaimCl
     const bounds: [number, number][] = [];
 
     donations.forEach(donation => {
-      if (!donation.latitude || !donation.longitude) return;
+       if (donation.latitude == null || donation.longitude == null) return;
 
       const color = getUrgencyColor(donation.expires_at);
       const hoursLeft = Math.max(
@@ -91,11 +102,14 @@ export const DonationsMap: React.FC<DonationsMapProps> = ({ donations, onClaimCl
 
       const marker = L.marker([donation.latitude, donation.longitude], { icon });
 
-      const popupContent = `
-        <div style="font-family:system-ui;min-width:200px;padding:4px">
-          <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;margin-bottom:4px">${donation.category}</div>
-          <div style="font-size:14px;font-weight:700;color:#111827;margin-bottom:6px;line-height:1.3">${donation.title}</div>
-          <div style="font-size:11px;color:#374151;margin-bottom:2px">&#x1F4E6; ${donation.quantity} ${donation.unit}</div>
+       const category = escapeHtml(donation.category);
+       const title = escapeHtml(donation.title);
+       const unit = escapeHtml(donation.unit);
+       const popupContent = `
+         <div style="font-family:system-ui;min-width:200px;padding:4px">
+           <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;margin-bottom:4px">${category}</div>
+           <div style="font-size:14px;font-weight:700;color:#111827;margin-bottom:6px;line-height:1.3">${title}</div>
+           <div style="font-size:11px;color:#374151;margin-bottom:2px">&#x1F4E6; ${donation.quantity} ${unit}</div>
           <div style="font-size:11px;color:${color};font-weight:600;margin-bottom:8px">&#x23F1; Expires in ${hoursLeft} hrs</div>
           <button
             id="claim-btn-${donation.id}"
@@ -153,7 +167,7 @@ export const DonationsMap: React.FC<DonationsMapProps> = ({ donations, onClaimCl
         style={{ height: '480px', zIndex: 1 }}
       />
       <p className="text-[10px] text-brand-stone-dark">
-        {donations.filter(d => d.latitude && d.longitude).length} donations shown on map. Click a pin to view details and claim.
+         {donations.filter(d => d.latitude != null && d.longitude != null).length} donations shown on map. Click a pin to view details and claim.
       </p>
     </div>
   );

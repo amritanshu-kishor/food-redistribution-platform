@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Union
+import hashlib
 import jwt
 import uuid
 import bcrypt
@@ -9,14 +10,24 @@ ALGORITHM = "HS256"
 
 def get_password_hash(password: str) -> str:
     """Hash a password using bcrypt."""
-    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    password_bytes = password.encode("utf-8")
+    if len(password_bytes) > 72:
+        raise ValueError("password is too long")
+    return bcrypt.hashpw(password_bytes, bcrypt.gensalt(rounds=12)).decode("utf-8")
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a plain password against its bcrypt hash."""
     try:
-        return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
+        password_bytes = plain_password.encode("utf-8")
+        if len(password_bytes) > 72:
+            return False
+        return bcrypt.checkpw(password_bytes, hashed_password.encode("utf-8"))
     except Exception:
         return False
+
+def hash_token(token: str) -> str:
+    """Create a one-way database representation of a bearer/reset token."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 def create_access_token(subject: Union[str, Any], expires_delta: Optional[timedelta] = None) -> str:
     """Generate an access JWT token."""

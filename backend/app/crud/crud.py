@@ -1,11 +1,11 @@
 import uuid
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, Tuple
-from sqlalchemy import select, and_, or_, func
+from sqlalchemy import and_
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 
-from app.core.security import get_password_hash
+from app.core.security import get_password_hash, hash_token
 from app.models.models import (
     User, UserRole, UserStatus, Organization, OrgVerificationStatus, OrganizationDocument,
     Donation, DonationStatus, DonationAllocation, AllocationStatus,
@@ -45,10 +45,15 @@ def get_user_by_id(db: Session, user_id: int) -> Optional[User]:
     return db.query(User).filter(User.id == user_id).first()
 
 def get_user_by_email(db: Session, email: str) -> Optional[User]:
-    return db.query(User).filter(User.email == email).first()
+    return db.query(User).filter(User.email == email.strip().lower()).first()
 
 def create_user(db: Session, user_in: UserCreate) -> User:
     """Create user and associate with a pending organization if not admin."""
+    if user_in.role == UserRole.ADMIN or not user_in.organization:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN if user_in.role == UserRole.ADMIN else status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Administrator accounts use the private bootstrap command." if user_in.role == UserRole.ADMIN else "Organization details are required.",
+        )
     hashed_pwd = get_password_hash(user_in.password)
     
     # Admin is active by default; restaurants/NGOs are pending until approved
@@ -112,8 +117,6 @@ def update_user(db: Session, db_user: User, user_in: UserUpdate) -> User:
         db_user.full_name = user_in.full_name
     if user_in.phone is not None:
         db_user.phone = user_in.phone
-    if user_in.password is not None:
-        db_user.hashed_password = get_password_hash(user_in.password)
     db.commit()
     db.refresh(db_user)
     return db_user
@@ -203,6 +206,11 @@ def update_user_status(db: Session, user_id: int, new_status: UserStatus, admin_
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+
+    if user.role == UserRole.ADMIN:
+        raise HTTPException(status_code=400, detail="The single administrator account cannot be changed here.")
+    if new_status == UserStatus.ACTIVE and (not user.organization or not user.organization.is_verified):
+        raise HTTPException(status_code=400, detail="Verify the organization before activating this account.")
         
     user.status = new_status
     if new_status == UserStatus.ACTIVE and user.organization:
@@ -257,6 +265,10 @@ def create_donation(db: Session, donation_in: DonationCreate, donor_org_id: int)
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only verified organization accounts can post donations."
         )
+
+    now = datetime.utcnow()
+    if donation_in.expires_at.replace(tzinfo=None) <= now:
+        raise HTTPException(status_code=400, detail="expires_at must be in the future")
         
     db_donation = Donation(
         donor_id=donor_org_id,
@@ -289,7 +301,7 @@ def create_donation(db: Session, donation_in: DonationCreate, donor_org_id: int)
 
 def update_donation(db: Session, donation_id: int, donation_in: DonationUpdate, actor_user_id: int) -> Donation:
     """Update donation details or transition state, validating changes."""
-    donation = db.query(Donation).filter(Donation.id == donation_id).first()
+    donation = db.query(Donation).filter(Donation.id == donation_id).populate_existing().with_for_update().first()
     if not donation:
         raise HTTPException(status_code=404, detail="Donation not found")
         
@@ -298,25 +310,88 @@ def update_donation(db: Session, donation_id: int, donation_in: DonationUpdate, 
     if donation.donor.user_id != actor_user_id and not is_admin:
         raise HTTPException(status_code=403, detail="Not authorized to modify this donation")
         
-    # Check status transition validity if updated
+    update_data = donation_in.model_dump(exclude_unset=True)
+
+    # Status changes are deliberately limited to owner actions. Acceptance,
+    # pickup, completion, and expiry are controlled by their workflow services.
+    cancelled_receiver_ids: list[int] = []
     if donation_in.status is not None and donation_in.status != donation.status:
         if not check_donation_transition(donation.status, donation_in.status):
             raise HTTPException(
                 status_code=400,
                 detail=f"Invalid donation status transition from {donation.status.value} to {donation_in.status.value}"
             )
+
+        allowed_manual = (
+            (donation.status == DonationStatus.DRAFT and donation_in.status == DonationStatus.AVAILABLE)
+            or donation_in.status == DonationStatus.CANCELLED
+        )
+        if not allowed_manual:
+            raise HTTPException(status_code=400, detail="This status is controlled by the claim and pickup workflow")
+        if donation_in.status == DonationStatus.AVAILABLE and donation.expires_at.replace(tzinfo=None) <= datetime.utcnow():
+            raise HTTPException(status_code=400, detail="Expired donations cannot be published")
+        if donation_in.status == DonationStatus.CANCELLED:
+            if any(allocation.status in {AllocationStatus.ACCEPTED, AllocationStatus.PICKED_UP, AllocationStatus.COMPLETED} for allocation in donation.allocations):
+                raise HTTPException(status_code=400, detail="A donation with an accepted or picked-up claim cannot be cancelled")
+            for allocation in donation.allocations:
+                if allocation.status == AllocationStatus.REQUESTED:
+                    allocation.status = AllocationStatus.CANCELLED
+                    cancelled_receiver_ids.append(allocation.receiver.user_id)
         donation.status = donation_in.status
-        
-    # Update other fields
-    update_data = donation_in.model_dump(exclude_unset=True)
-    if "status" in update_data:
-        del update_data["status"]
+
+    update_data.pop("status", None)
+
+    active_allocations = [
+        allocation for allocation in donation.allocations
+        if allocation.status in {
+            AllocationStatus.REQUESTED,
+            AllocationStatus.ACCEPTED,
+            AllocationStatus.PICKED_UP,
+            AllocationStatus.COMPLETED,
+        }
+    ]
+    if active_allocations and any(field in update_data and update_data[field] != getattr(donation, field) for field in ("quantity", "unit")):
+        raise HTTPException(status_code=400, detail="Quantity and unit cannot change after a claim is requested")
+
+    if "quantity" in update_data:
+        reserved = sum(
+            allocation.requested_quantity if allocation.status == AllocationStatus.REQUESTED else allocation.allocated_quantity
+            for allocation in active_allocations
+        )
+        if update_data["quantity"] < reserved:
+            raise HTTPException(status_code=400, detail="Quantity cannot be lower than active claims")
+
+    effective_prepared = update_data.get("prepared_at", donation.prepared_at)
+    effective_expires = update_data.get("expires_at", donation.expires_at)
+    effective_pickup_start = update_data.get("pickup_start", donation.pickup_start)
+    effective_pickup_end = update_data.get("pickup_end", donation.pickup_end)
+    if effective_expires <= effective_prepared:
+        raise HTTPException(status_code=400, detail="expires_at must be after prepared_at")
+    if effective_pickup_start < effective_prepared or effective_pickup_end <= effective_pickup_start:
+        raise HTTPException(status_code=400, detail="Invalid pickup schedule")
+    if effective_pickup_end > effective_expires:
+        raise HTTPException(status_code=400, detail="pickup_end cannot be after expires_at")
+    if effective_expires.replace(tzinfo=None) <= datetime.utcnow() and donation.status in {
+        DonationStatus.DRAFT,
+        DonationStatus.AVAILABLE,
+        DonationStatus.REQUESTED,
+    }:
+        raise HTTPException(status_code=400, detail="Active donations must expire in the future")
         
     for k, v in update_data.items():
         setattr(donation, k, v)
         
     db.commit()
     db.refresh(donation)
+
+    for receiver_user_id in cancelled_receiver_ids:
+        create_notification(
+            db,
+            user_id=receiver_user_id,
+            title="Claim Request Cancelled",
+            message=f"The donation '{donation.title}' was cancelled by the donor.",
+            notification_type=NotificationType.ALERT,
+        )
     
     # Audit log
     create_audit_log(
@@ -330,18 +405,28 @@ def update_donation(db: Session, donation_id: int, donation_in: DonationUpdate, 
     return donation
 
 def auto_expire_donations(db: Session) -> int:
-    """Enforce expiration limits. Changes AVAILABLE or REQUESTED donations to EXPIRED if past expires_at."""
+    """Expire uncollected food under the same parent lock used by claims."""
     now = datetime.utcnow()
-    expired_donations = db.query(Donation).filter(
+    expirable = [DonationStatus.AVAILABLE, DonationStatus.REQUESTED, DonationStatus.ACCEPTED, DonationStatus.PICKUP_PENDING]
+    expired_ids = db.query(Donation.id).filter(
         and_(
-            Donation.status.in_([DonationStatus.AVAILABLE, DonationStatus.REQUESTED]),
+            Donation.status.in_(expirable),
             Donation.expires_at < now
         )
-    ).all()
+    ).order_by(Donation.id).all()
     
     count = 0
-    for donation in expired_donations:
+    for (donation_id,) in expired_ids:
+        donation = db.query(Donation).filter(Donation.id == donation_id).populate_existing().with_for_update().first()
+        if not donation or donation.status not in expirable or donation.expires_at >= now:
+            continue
         donation.status = DonationStatus.EXPIRED
+        failed_receivers = []
+        for alloc in donation.allocations:
+            if alloc.status in [AllocationStatus.REQUESTED, AllocationStatus.ACCEPTED]:
+                alloc.status = AllocationStatus.FAILED
+                failed_receivers.append(alloc.receiver.user_id)
+        db.commit()
         count += 1
         
         # Notify donor
@@ -354,17 +439,14 @@ def auto_expire_donations(db: Session) -> int:
         )
         
         # Fail any open pending requests
-        for alloc in donation.allocations:
-            if alloc.status == AllocationStatus.REQUESTED:
-                alloc.status = AllocationStatus.FAILED
-                # Notify NGO
-                create_notification(
-                    db,
-                    user_id=alloc.receiver.user_id,
-                    title="Claim Request Failed",
-                    message=f"The donation '{donation.title}' you requested has expired.",
-                    notification_type=NotificationType.ALERT
-                )
+        for receiver_id in failed_receivers:
+            create_notification(
+                db,
+                user_id=receiver_id,
+                title="Claim Request Failed",
+                message=f"The donation '{donation.title}' was not completed before its expiry.",
+                notification_type=NotificationType.ALERT
+            )
                 
         create_audit_log(
             db,
@@ -401,17 +483,58 @@ def calculate_remaining_available_quantity(donation: Donation) -> float:
     )
     return max(0.0, donation.quantity - allocated - pending)
 
+
+def sync_donation_status(donation: Donation) -> None:
+    """Derive the listing state without hiding an unallocated remainder."""
+    if donation.status in {DonationStatus.CANCELLED, DonationStatus.EXPIRED}:
+        return
+    states = {allocation.status for allocation in donation.allocations}
+    waiting = states & {AllocationStatus.REQUESTED, AllocationStatus.ACCEPTED}
+    if donation.expires_at <= datetime.utcnow() and calculate_remaining_quantity(donation) > 0:
+        donation.status = DonationStatus.EXPIRED
+    elif calculate_remaining_quantity(donation) > 0:
+        donation.status = DonationStatus.REQUESTED if waiting else DonationStatus.AVAILABLE
+    elif waiting:
+        donation.status = DonationStatus.PICKUP_PENDING if states & {AllocationStatus.PICKED_UP, AllocationStatus.COMPLETED} else DonationStatus.ACCEPTED
+    else:
+        donation.status = DonationStatus.PICKED_UP if AllocationStatus.PICKED_UP in states else DonationStatus.COMPLETED
+
+
+def lock_allocation(db: Session, allocation_id: int) -> Tuple[DonationAllocation, Donation]:
+    # Always lock parent then child, including cancellation and expiry paths.
+    # Reading only the ID first avoids caching an allocation while waiting.
+    reference = db.query(DonationAllocation.donation_id).filter(DonationAllocation.id == allocation_id).first()
+    if not reference:
+        raise HTTPException(status_code=404, detail="Allocation not found")
+    donation = db.query(Donation).filter(Donation.id == reference.donation_id).populate_existing().with_for_update().first()
+    allocation = db.query(DonationAllocation).filter(DonationAllocation.id == allocation_id).populate_existing().with_for_update().first()
+    if not donation or not allocation:
+        raise HTTPException(status_code=404, detail="Allocation not found")
+    return allocation, donation
+
 def create_allocation(db: Session, alloc_in: AllocationCreate, receiver_org_id: int) -> DonationAllocation:
     """NGO claims a portion of an available donation. Uses transaction locks."""
     # 1. Lock the Donation row using FOR UPDATE to prevent race conditions
-    donation = db.query(Donation).filter(Donation.id == alloc_in.donation_id).with_for_update().first()
+    donation = db.query(Donation).filter(Donation.id == alloc_in.donation_id).populate_existing().with_for_update().first()
     if not donation:
         raise HTTPException(status_code=404, detail="Donation not found")
         
     # Check NGO eligibility
     receiver = db.query(Organization).filter(Organization.id == receiver_org_id).first()
-    if not receiver or not receiver.is_verified:
+    if not receiver or not receiver.is_verified or not receiver.user or receiver.user.role != UserRole.NGO:
         raise HTTPException(status_code=403, detail="Only verified NGOs can request allocations.")
+
+    existing_active = db.query(DonationAllocation).filter(
+        DonationAllocation.donation_id == donation.id,
+        DonationAllocation.receiver_id == receiver_org_id,
+        DonationAllocation.status.in_([
+            AllocationStatus.REQUESTED,
+            AllocationStatus.ACCEPTED,
+            AllocationStatus.PICKED_UP,
+        ]),
+    ).first()
+    if existing_active:
+        raise HTTPException(status_code=409, detail="Your organization already has an active claim for this donation.")
         
     # Check if expired
     if donation.expires_at < datetime.utcnow() or donation.status == DonationStatus.EXPIRED:
@@ -468,17 +591,20 @@ def create_allocation(db: Session, alloc_in: AllocationCreate, receiver_org_id: 
 
 def accept_allocation(db: Session, allocation_id: int, actor_user_id: int) -> DonationAllocation:
     """Restaurant approves the NGO claim. Updates allocated quantity and locks it."""
-    # Lock the donation associated with the allocation
-    allocation = db.query(DonationAllocation).filter(DonationAllocation.id == allocation_id).first()
-    if not allocation:
-        raise HTTPException(status_code=404, detail="Allocation not found")
-        
-    donation = db.query(Donation).filter(Donation.id == allocation.donation_id).with_for_update().first()
+    allocation, donation = lock_allocation(db, allocation_id)
     if donation.donor.user_id != actor_user_id:
         raise HTTPException(status_code=403, detail="Not authorized to manage this donation's claims")
         
     if allocation.status != AllocationStatus.REQUESTED:
         raise HTTPException(status_code=400, detail="Can only accept pending requests")
+
+    if donation.status == DonationStatus.CANCELLED:
+        raise HTTPException(status_code=400, detail="This donation was cancelled")
+
+    if donation.expires_at.replace(tzinfo=None) <= datetime.utcnow() or donation.status == DonationStatus.EXPIRED:
+        allocation.status = AllocationStatus.FAILED
+        db.commit()
+        raise HTTPException(status_code=400, detail="This donation has expired and cannot be accepted")
         
     # Verify quantity is still available
     remaining = calculate_remaining_quantity(donation)
@@ -496,10 +622,7 @@ def accept_allocation(db: Session, allocation_id: int, actor_user_id: int) -> Do
     # Generate secure QR token reference
     allocation.qr_token = f"claim_{uuid.uuid4().hex}"
     
-    # Check if remaining quantity becomes 0. If so, update donation status
-    new_remaining = calculate_remaining_quantity(donation)
-    if new_remaining <= 0:
-        donation.status = DonationStatus.ACCEPTED
+    sync_donation_status(donation)
         
     db.commit()
     db.refresh(allocation)
@@ -526,11 +649,7 @@ def accept_allocation(db: Session, allocation_id: int, actor_user_id: int) -> Do
 
 def reject_allocation(db: Session, allocation_id: int, actor_user_id: int) -> DonationAllocation:
     """Reject an NGO's claim."""
-    allocation = db.query(DonationAllocation).filter(DonationAllocation.id == allocation_id).first()
-    if not allocation:
-        raise HTTPException(status_code=404, detail="Allocation not found")
-        
-    donation = db.query(Donation).filter(Donation.id == allocation.donation_id).first()
+    allocation, donation = lock_allocation(db, allocation_id)
     if donation.donor.user_id != actor_user_id:
         raise HTTPException(status_code=403, detail="Not authorized to reject this claim")
         
@@ -539,15 +658,7 @@ def reject_allocation(db: Session, allocation_id: int, actor_user_id: int) -> Do
         
     allocation.status = AllocationStatus.REJECTED
     
-    # If no pending requests left and unallocated quantity > 0, set status back to AVAILABLE
-    pending_count = db.query(DonationAllocation).filter(
-        and_(
-            DonationAllocation.donation_id == donation.id,
-            DonationAllocation.status == AllocationStatus.REQUESTED
-        )
-    ).count()
-    if pending_count == 0 and calculate_remaining_quantity(donation) > 0:
-        donation.status = DonationStatus.AVAILABLE
+    sync_donation_status(donation)
         
     db.commit()
     db.refresh(allocation)
@@ -576,55 +687,57 @@ def reject_allocation(db: Session, allocation_id: int, actor_user_id: int) -> Do
 # =========================================================================
 def verify_qr_scan(db: Session, scanned_code: str, event_type: QRVerificationType, actor_id: int) -> QRScanResult:
     """Scan and process QR code to confirm pickup or completion."""
-    # Find allocation associated with the qr_token
-    allocation = db.query(DonationAllocation).filter(DonationAllocation.qr_token == scanned_code).first()
+    reference = db.query(DonationAllocation.id).filter(
+        DonationAllocation.qr_token == scanned_code
+    ).first()
     actor = db.query(User).filter(User.id == actor_id).first()
     
-    if not allocation:
-        # Create failure audit log
-        QRVerificationEvent(
-            donation_id=0,
+    if not reference:
+        # Do not create a row with a fake donation foreign key. The audit log
+        # captures invalid scans without storing the bearer token itself.
+        create_audit_log(
+            db,
+            actor_id=actor_id,
+            action="qr_verify_invalid",
+            target_table="donation_allocations",
+            target_id=None,
+            metadata_json={"status": "INVALID", "token_hash": hash_token(scanned_code)},
+        )
+        return QRScanResult(status="INVALID", message="Invalid QR code reference token.")
+
+    allocation, donation = lock_allocation(db, reference.id)
+    if not actor or not actor.organization:
+        raise HTTPException(status_code=403, detail="Only an involved organization can verify this transaction.")
+    if actor.organization.id not in [donation.donor_id, allocation.receiver_id]:
+        raise HTTPException(status_code=403, detail="You are not authorized to verify this transaction.")
+
+    def failed_result(message: str) -> QRScanResult:
+        db.add(QRVerificationEvent(
+            donation_id=donation.id,
+            allocation_id=allocation.id,
             event_type=event_type,
             scanned_by_id=actor_id,
-            scanned_code=scanned_code,
-            status="INVALID",
-            error_message="Invalid QR Code reference."
-        )
+            scanned_code=hash_token(scanned_code),
+            status="FAILED",
+            error_message=message,
+        ))
         db.commit()
-        return QRScanResult(status="INVALID", message="Invalid QR code reference token.")
-        
-    donation = allocation.donation
+        return QRScanResult(status="FAILED", message=message, allocation_id=allocation.id, donation_id=donation.id)
     
     # Transition validation
     if event_type == QRVerificationType.PICKUP:
-        # Confirming pickup: Done by the Restaurant (donor) scanning the NGO's QR code
-        # Or NGO scanning Restaurant QR. To make it flexible: anyone involved can confirm.
-        # Let's ensure the user scanning is either the donor or the receiver
-        if actor.organization.id not in [donation.donor_id, allocation.receiver_id]:
-            raise HTTPException(status_code=403, detail="You are not authorized to verify this transaction.")
-            
+        if actor.role != UserRole.RESTAURANT or actor.organization.id != donation.donor_id:
+            raise HTTPException(status_code=403, detail="Only the donor restaurant can confirm pickup.")
         if allocation.status != AllocationStatus.ACCEPTED:
-            return QRScanResult(
-                status="FAILED",
-                message=f"Cannot confirm pickup. Current status is {allocation.status.value} instead of ACCEPTED.",
-                allocation_id=allocation.id
-            )
+            return failed_result(f"Cannot confirm pickup. Current status is {allocation.status.value} instead of ACCEPTED.")
+        if donation.expires_at <= datetime.utcnow() or donation.status in {DonationStatus.EXPIRED, DonationStatus.CANCELLED}:
+            return failed_result("Cannot confirm pickup of expired or cancelled food.")
             
         # Update Allocation Status
         allocation.status = AllocationStatus.PICKED_UP
+        db.flush()
         
-        # Update Donation aggregate status
-        # If all allocations are accepted/picked up, move donation to PICKED_UP
-        non_final_allocs = db.query(DonationAllocation).filter(
-            and_(
-                DonationAllocation.donation_id == donation.id,
-                DonationAllocation.status.in_([AllocationStatus.REQUESTED, AllocationStatus.ACCEPTED])
-            )
-        ).count()
-        if non_final_allocs == 0:
-            donation.status = DonationStatus.PICKED_UP
-        else:
-            donation.status = DonationStatus.PICKUP_PENDING
+        sync_donation_status(donation)
             
         # Record successful event
         event = QRVerificationEvent(
@@ -632,7 +745,7 @@ def verify_qr_scan(db: Session, scanned_code: str, event_type: QRVerificationTyp
             allocation_id=allocation.id,
             event_type=event_type,
             scanned_by_id=actor_id,
-            scanned_code=scanned_code,
+            scanned_code=hash_token(scanned_code),
             status="SUCCESS"
         )
         db.add(event)
@@ -671,36 +784,22 @@ def verify_qr_scan(db: Session, scanned_code: str, event_type: QRVerificationTyp
         
     elif event_type == QRVerificationType.COMPLETION:
         # Confirming completion: NGO arrived and completed distribution/handover.
-        if actor.organization.id not in [donation.donor_id, allocation.receiver_id]:
-            raise HTTPException(status_code=403, detail="You are not authorized to verify this transaction.")
-            
+        if actor.role != UserRole.NGO or actor.organization.id != allocation.receiver_id:
+            raise HTTPException(status_code=403, detail="Only the receiving NGO can confirm completion.")
         if allocation.status != AllocationStatus.PICKED_UP:
-            return QRScanResult(
-                status="FAILED",
-                message=f"Cannot confirm completion. Status is {allocation.status.value} instead of PICKED_UP.",
-                allocation_id=allocation.id
-            )
+            return failed_result(f"Cannot confirm completion. Status is {allocation.status.value} instead of PICKED_UP.")
             
         allocation.status = AllocationStatus.COMPLETED
+        db.flush()
         
-        # If all allocations for the donation are completed, transition donation to COMPLETED
-        active_allocs = db.query(DonationAllocation).filter(
-            and_(
-                DonationAllocation.donation_id == donation.id,
-                DonationAllocation.status != AllocationStatus.COMPLETED,
-                DonationAllocation.status != AllocationStatus.CANCELLED,
-                DonationAllocation.status != AllocationStatus.REJECTED
-            )
-        ).count()
-        if active_allocs == 0:
-            donation.status = DonationStatus.COMPLETED
+        sync_donation_status(donation)
             
         event = QRVerificationEvent(
             donation_id=donation.id,
             allocation_id=allocation.id,
             event_type=event_type,
             scanned_by_id=actor_id,
-            scanned_code=scanned_code,
+            scanned_code=hash_token(scanned_code),
             status="SUCCESS"
         )
         db.add(event)
@@ -749,6 +848,27 @@ def create_complaint(
     title: str,
     description: str
 ) -> ReportComplaint:
+    reporter = db.query(User).filter(User.id == reporter_id).first()
+    if not reporter:
+        raise HTTPException(status_code=404, detail="Reporter not found")
+    if reported_user_id is not None:
+        reported_user = db.query(User).filter(User.id == reported_user_id).first()
+        if not reported_user or reported_user_id == reporter_id:
+            raise HTTPException(status_code=400, detail="Invalid reported user")
+    donation = None
+    if donation_id is not None:
+        donation = db.query(Donation).filter(Donation.id == donation_id).first()
+        if not donation:
+            raise HTTPException(status_code=404, detail="Donation not found")
+        involved = reporter.organization and reporter.organization.id == donation.donor_id
+        if not involved:
+            involved = db.query(DonationAllocation).filter(
+                DonationAllocation.donation_id == donation.id,
+                DonationAllocation.receiver_id == (reporter.organization.id if reporter.organization else -1),
+            ).first() is not None
+        if not involved:
+            raise HTTPException(status_code=403, detail="You can only report a donation you are involved with")
+
     complaint = ReportComplaint(
         reporter_id=reporter_id,
         reported_user_id=reported_user_id,

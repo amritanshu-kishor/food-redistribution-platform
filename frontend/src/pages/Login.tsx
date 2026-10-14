@@ -2,13 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { navigateTo } from '../services/router';
 import { AlertCircle, Eye, EyeOff } from 'lucide-react';
-
-const demos = [
-  { label: 'Admin', email: 'admin@foodshare.io', password: 'Admin@1234' },
-  { label: 'Top kitchen', email: 'contact@spicegarden.com', password: 'Demo@1234' },
-  { label: 'Top NGO', email: 'info@hungerrelief.org', password: 'Demo@1234' },
-  { label: 'Pending kitchen', email: 'pending.kitchen@foodshare.io', password: 'Demo@1234' },
-];
+import { apiErrorMessage } from '../services/api';
 
 export const Login: React.FC = () => {
   const { login, user } = useAuth();
@@ -16,13 +10,11 @@ export const Login: React.FC = () => {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [sessionExpired, setSessionExpired] = useState(false);
+  const [sessionExpired, setSessionExpired] = useState(() => new URLSearchParams(window.location.search).get('expired') === 'true');
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (user) navigateTo(`/${user.role}`);
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('expired') === 'true') setSessionExpired(true);
   }, [user]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -34,7 +26,7 @@ export const Login: React.FC = () => {
       const loggedUser = await login(email, password);
       navigateTo(`/${loggedUser.role}`);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to authenticate. Please check your credentials.');
+      setError(apiErrorMessage(err, 'Failed to authenticate. Please check your credentials.'));
     } finally {
       setLoading(false);
     }
@@ -51,18 +43,10 @@ export const Login: React.FC = () => {
               Kitchens post surplus. NGOs claim it. Admins keep the network trusted.
             </p>
           </div>
-          <div className="space-y-3">
-            {demos.map((d) => (
-              <button
-                key={d.email}
-                type="button"
-                onClick={() => { setEmail(d.email); setPassword(d.password); }}
-                className="w-full text-left rounded-2xl bg-white/8 hover:bg-white/14 border border-white/10 px-4 py-3 cursor-pointer"
-              >
-                <p className="text-[10px] uppercase tracking-widest text-brand-gold">{d.label}</p>
-                <p className="text-sm font-medium mt-0.5">{d.email}</p>
-              </button>
-            ))}
+          <div className="rounded-2xl bg-white/8 border border-white/10 px-4 py-4">
+            <p className="text-[10px] uppercase tracking-widest text-brand-gold">Three trusted roles</p>
+            <p className="text-sm font-medium mt-1">Restaurants, NGOs, and the single platform administrator each get a focused workspace.</p>
+            <p className="text-xs text-brand-ivory/60 mt-2">Use the credentials supplied by your organization or deployment administrator.</p>
           </div>
         </div>
 
@@ -80,27 +64,29 @@ export const Login: React.FC = () => {
               </div>
             )}
             {error && (
-              <div className="mb-4 bg-brand-red/10 border border-brand-red/30 text-brand-red text-xs rounded-2xl p-3 font-semibold flex items-center gap-2">
+              <div role="alert" className="mb-4 bg-brand-red/10 border border-brand-red/30 text-brand-red text-xs rounded-2xl p-3 font-semibold flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 flex-shrink-0" />
                 <span>{error}</span>
               </div>
             )}
             <form onSubmit={handleSubmit} className="flex flex-col gap-4">
               <div className="flex flex-col gap-1 text-left">
-                <label className="text-[10px] uppercase tracking-wider font-bold text-brand-charcoal/80">Email</label>
-                <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@organization.org" className="input-tactile text-sm" />
+                <label htmlFor="login-email" className="text-[10px] uppercase tracking-wider font-bold text-brand-charcoal/80">Email</label>
+                <input id="login-email" autoComplete="username" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@organization.org" className="input-tactile text-sm" />
               </div>
               <div className="flex flex-col gap-1 text-left">
-                <label className="text-[10px] uppercase tracking-wider font-bold text-brand-charcoal/80">Password</label>
+                <label htmlFor="login-password" className="text-[10px] uppercase tracking-wider font-bold text-brand-charcoal/80">Password</label>
                 <div className="relative">
                   <input
+                    id="login-password"
+                    autoComplete="current-password"
                     type={showPassword ? 'text' : 'password'}
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className="input-tactile text-sm pr-10"
                   />
-                  <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-brand-charcoal/40 cursor-pointer">
+                  <button type="button" aria-label={showPassword ? 'Hide password' : 'Show password'} onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-brand-charcoal/40 cursor-pointer">
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>

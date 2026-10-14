@@ -1,18 +1,19 @@
 import smtplib
+import logging
+from html import escape
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models.models import Notification, NotificationType
 
+logger = logging.getLogger("foodshare.notifications")
+
 def send_email(to_email: str, subject: str, html_content: str) -> bool:
     """Send an email using the configured provider (Console log or SMTP)."""
     if settings.EMAIL_PROVIDER == "console":
-        print("\n" + "="*80)
-        print(f" [MOCK EMAIL] TO: {to_email}")
-        print(f" SUBJECT: {subject}")
-        print(f" CONTENT:\n{html_content}")
-        print("="*80 + "\n")
+        # Never print reset URLs, tokens, or notification bodies to logs.
+        logger.info("Email provider is console; notification suppressed (subject=%s)", subject)
         return True
     
     # SMTP Delivery
@@ -32,11 +33,8 @@ def send_email(to_email: str, subject: str, html_content: str) -> bool:
         server.sendmail(settings.SMTP_FROM_EMAIL, to_email, msg.as_string())
         server.quit()
         return True
-    except Exception as e:
-        print(f"SMTP delivery failed to {to_email}: {str(e)}")
-        # Graceful fallback to console logging in development
-        if settings.ENV == "development":
-            print(f" [Fallback Console Email] TO: {to_email} | SUBJECT: {subject} | {html_content}")
+    except Exception:
+        logger.exception("SMTP delivery failed")
         return False
 
 def create_notification(
@@ -64,8 +62,8 @@ def create_notification(
         email_body = f"""
         <html>
             <body style="font-family: sans-serif; color: #1C1C1C; background: #FAF9F6; padding: 20px;">
-                <h2 style="color: #2D5A27;">{title}</h2>
-                <p style="font-size: 16px; line-height: 1.5;">{message}</p>
+                <h2 style="color: #2D5A27;">{escape(title)}</h2>
+                <p style="font-size: 16px; line-height: 1.5;">{escape(message)}</p>
                 <br/>
                 <hr style="border: 0; border-top: 1px solid #E7E5E4;"/>
                 <p style="font-size: 12px; color: #A8A29E;">

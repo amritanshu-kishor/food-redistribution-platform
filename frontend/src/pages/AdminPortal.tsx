@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { api, mediaUrl } from '../services/api';
+import { api, apiErrorMessage } from '../services/api';
 import { Layout } from '../components/Layout';
 import { DonutChart, AreaChart } from '../components/SVGCharts';
 import { 
@@ -29,9 +29,9 @@ interface Organization {
 interface OrgDocument {
   id: number;
   organization_id: number;
-  doc_type: string;
+  document_type: string;
   file_name: string;
-  file_path: string;
+  content_type: string;
   uploaded_at: string;
 }
 
@@ -43,9 +43,9 @@ interface Complaint {
   reported_user_name?: string;
   donation_id?: number;
   donation_title?: string;
-  complaint_type: string;
+  title: string;
   description: string;
-  status: 'pending' | 'resolved' | 'dismissed';
+  status: 'pending' | 'resolved' | 'ignored';
   resolution_notes?: string;
   created_at: string;
 }
@@ -106,7 +106,7 @@ export const AdminPortal: React.FC<{ path: string }> = ({ path }) => {
         setAuditLogs(auditResp.data);
       }
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Failed to load administrative console data.");
+      setError(apiErrorMessage(err, "Failed to load administrative console data."));
     } finally {
       setLoading(false);
     }
@@ -119,18 +119,37 @@ export const AdminPortal: React.FC<{ path: string }> = ({ path }) => {
   }, [path]);
 
   // Suspend/Reactivate user status
-  const handleUserStatusToggle = async (userId: number, currentStatus: string) => {
+  const handleUserStatusToggle = async (userId: number, newStatus: 'active' | 'suspended') => {
     setActionLoading(true);
     setError(null);
     setSuccess(null);
-    const newStatus = currentStatus === 'suspended' ? 'active' : 'suspended';
     try {
       await api.put(`/admin/users/${userId}/status?status_choice=${newStatus}`);
       setSuccess(`User account status updated to: ${newStatus.toUpperCase()}`);
       const usersResp = await api.get('/admin/users');
       setUsers(usersResp.data);
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Status transition failed.");
+      setError(apiErrorMessage(err, "Status transition failed."));
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDocumentDownload = async (documentId: number, fileName: string) => {
+    setActionLoading(true);
+    setError(null);
+    try {
+      const response = await api.get(`/admin/documents/${documentId}/download`, { responseType: 'blob' });
+      const url = window.URL.createObjectURL(response.data);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      setError('Failed to download the verification document.');
     } finally {
       setActionLoading(false);
     }
@@ -147,7 +166,7 @@ export const AdminPortal: React.FC<{ path: string }> = ({ path }) => {
       setSuccess(`Organization status has been verified as: ${verifyChoice.toUpperCase()}`);
       loadData();
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Verification change failed.");
+      setError(apiErrorMessage(err, "Verification change failed."));
     } finally {
       setActionLoading(false);
     }
@@ -168,7 +187,7 @@ export const AdminPortal: React.FC<{ path: string }> = ({ path }) => {
       setResolvingComplaint(null);
       loadData();
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Failed to resolve complaint.");
+      setError(apiErrorMessage(err, "Failed to resolve complaint."));
     } finally {
       setActionLoading(false);
     }
@@ -196,9 +215,11 @@ export const AdminPortal: React.FC<{ path: string }> = ({ path }) => {
       link.setAttribute('download', `${reportType}_report_${new Date().toISOString().slice(0,10)}.${reportFormat}`);
       document.body.appendChild(link);
       link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
       
       setSuccess("Platform report downloaded successfully.");
-    } catch (err: any) {
+    } catch {
       setError("Failed to generate and download report file.");
     } finally {
       setActionLoading(false);
@@ -350,7 +371,7 @@ export const AdminPortal: React.FC<{ path: string }> = ({ path }) => {
                         <div className="flex justify-end gap-2">
                           {u.status === 'pending' && (
                             <button
-                              onClick={() => handleUserStatusToggle(u.id, 'suspended')}
+                               onClick={() => handleUserStatusToggle(u.id, 'active')}
                               disabled={actionLoading}
                               className="btn-tactile-green text-[10px] px-3 py-1 flex items-center gap-1.5"
                             >
@@ -359,7 +380,7 @@ export const AdminPortal: React.FC<{ path: string }> = ({ path }) => {
                           )}
                           {u.status !== 'pending' && (
                             <button
-                              onClick={() => handleUserStatusToggle(u.id, u.status)}
+                               onClick={() => handleUserStatusToggle(u.id, u.status === 'suspended' ? 'active' : 'suspended')}
                               disabled={actionLoading}
                               className={`btn-tactile-secondary text-[10px] px-3 py-1 flex items-center gap-1.5 ${
                                 u.status === 'suspended' ? 'hover:bg-brand-green/15 text-brand-green' : 'hover:bg-brand-red/10 text-brand-red'
@@ -458,14 +479,16 @@ export const AdminPortal: React.FC<{ path: string }> = ({ path }) => {
                             orgDocs.map((doc) => (
                               <a
                                 key={doc.id}
-                                href={mediaUrl(doc.file_path)}
-                                target="_blank"
-                                rel="noreferrer"
+                                 href="#"
+                                 onClick={(event) => {
+                                   event.preventDefault();
+                                   handleDocumentDownload(doc.id, doc.file_name);
+                                 }}
                                 className="flex items-center justify-between border border-brand-stone-dark rounded p-2.5 bg-brand-stone-light hover:bg-brand-stone/40 transition"
                               >
                                 <span className="font-semibold text-brand-charcoal flex items-center gap-2">
                                   <FileText className="w-4 h-4 text-brand-green" />
-                                  {doc.doc_type.toUpperCase()} ({doc.file_name})
+                                   {doc.document_type.toUpperCase()} ({doc.file_name})
                                 </span>
                                 <span className="text-[10px] text-brand-green font-bold uppercase hover:underline">View File</span>
                               </a>
@@ -513,11 +536,11 @@ export const AdminPortal: React.FC<{ path: string }> = ({ path }) => {
                     <tr key={c.id} className="hover:bg-brand-stone/20">
                       <td className="p-4 font-bold">#{c.id}</td>
                       <td className="p-4 font-bold text-brand-charcoal">{c.reporter_name}</td>
-                      <td className="p-4 uppercase">{c.complaint_type}</td>
+                       <td className="p-4 uppercase">{c.title}</td>
                       <td className="p-4 max-w-sm truncate">{c.description}</td>
                       <td className="p-4">
                         <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                          c.status === 'resolved' ? 'bg-brand-green/10 text-brand-green' : 'bg-brand-red/10 text-brand-red'
+                           c.status === 'resolved' ? 'bg-brand-green/10 text-brand-green' : c.status === 'ignored' ? 'bg-brand-stone text-brand-charcoal' : 'bg-brand-red/10 text-brand-red'
                         }`}>
                           {c.status.toUpperCase()}
                         </span>
@@ -648,7 +671,7 @@ export const AdminPortal: React.FC<{ path: string }> = ({ path }) => {
             </h3>
             
             <div className="text-xs text-brand-charcoal/70 bg-brand-stone-light p-3 border border-brand-stone-dark rounded flex flex-col gap-1 leading-relaxed">
-              <span><strong>Type:</strong> {resolvingComplaint.complaint_type}</span>
+                <span><strong>Title:</strong> {resolvingComplaint.title}</span>
               <span><strong>Reporter:</strong> {resolvingComplaint.reporter_name}</span>
               <span><strong>Details:</strong> {resolvingComplaint.description}</span>
             </div>

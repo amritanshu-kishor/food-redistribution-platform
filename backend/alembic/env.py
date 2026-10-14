@@ -8,8 +8,7 @@ from alembic import context
 # Add backend root to Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from app.core.config import settings
-from app.core.database import Base
+from app.core.database import Base, database_url
 # Import all models to ensure they are registered on the Base metadata
 from app.models.models import (
     User, Organization, OrganizationDocument, Donation, DonationAllocation,
@@ -25,7 +24,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Set database URL dynamically from environments
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+config.set_main_option("sqlalchemy.url", database_url.render_as_string(hide_password=False))
 
 target_metadata = Base.metadata
 

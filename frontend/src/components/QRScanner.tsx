@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 
 interface QRScannerProps {
@@ -15,6 +15,21 @@ export const QRScanner: React.FC<QRScannerProps> = ({
   const [manualCode, setManualCode] = useState('');
   const [scanning, setScanning] = useState(false);
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
+  const onScanSuccessRef = useRef(onScanSuccess);
+  const onScanErrorRef = useRef(onScanError);
+
+  useEffect(() => {
+    onScanSuccessRef.current = onScanSuccess;
+    onScanErrorRef.current = onScanError;
+  }, [onScanSuccess, onScanError]);
+
+  const stopScanning = useCallback(() => {
+    if (scannerRef.current) {
+      scannerRef.current.clear().catch(() => undefined);
+      scannerRef.current = null;
+    }
+    setScanning(false);
+  }, []);
 
   useEffect(() => {
     if (scanning) {
@@ -31,11 +46,11 @@ export const QRScanner: React.FC<QRScannerProps> = ({
 
       scannerRef.current.render(
         (decodedText) => {
-          onScanSuccess(decodedText);
+          onScanSuccessRef.current(decodedText);
           stopScanning();
         },
         (error) => {
-          if (onScanError) onScanError(error);
+          if (onScanErrorRef.current) onScanErrorRef.current(error);
         }
       );
     }
@@ -43,17 +58,7 @@ export const QRScanner: React.FC<QRScannerProps> = ({
     return () => {
       stopScanning();
     };
-  }, [scanning]);
-
-  const stopScanning = () => {
-    if (scannerRef.current) {
-      scannerRef.current.clear().catch((err) => 
-        console.error("Html5Qrcode clear failure:", err)
-      );
-      scannerRef.current = null;
-    }
-    setScanning(false);
-  };
+  }, [scanning, stopScanning]);
 
   const handleManualVerify = (e: React.FormEvent) => {
     e.preventDefault();

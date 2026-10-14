@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { navigateTo } from '../services/router';
 import { AlertCircle, CheckCircle, Navigation, MapPin } from 'lucide-react';
+import { apiErrorMessage } from '../services/api';
 
 export const Register: React.FC = () => {
   const { register } = useAuth();
@@ -86,7 +87,7 @@ export const Register: React.FC = () => {
         navigateTo('/login');
       }, 3000);
     } catch (err: any) {
-      const errorMsg = err.response?.data?.detail || "Registration failed. Please check inputs.";
+      const errorMsg = apiErrorMessage(err, "Registration failed. Please check inputs.");
       setError(errorMsg);
     } finally {
       setLoading(false);

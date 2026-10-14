@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { api, mediaUrl } from '../services/api';
+import { api, apiErrorMessage, mediaUrl } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { navigateTo } from '../services/router';
 import { Layout } from '../components/Layout';
@@ -110,7 +110,7 @@ export const RestaurantPortal: React.FC<{ path: string }> = ({ path }) => {
         const claimsResp = await api.get('/allocations/my/incoming');
         setIncomingClaims(claimsResp.data.filter((c: Allocation) => c.status === 'REQUESTED' || c.status === 'ACCEPTED'));
         
-        // Metrics compilation (mocked aggregates if endpoint is admin-only, but let's query my analytics)
+        // Compile the restaurant's own metrics from its authorized listings.
         const categories = listResp.data.reduce((acc: any, curr: Donation) => {
           acc[curr.category] = (acc[curr.category] || 0) + curr.quantity;
           return acc;
@@ -142,7 +142,7 @@ export const RestaurantPortal: React.FC<{ path: string }> = ({ path }) => {
         setAnalyticsData({ categoryPoints, timeline });
       }
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Failed to load restaurant data.");
+      setError(apiErrorMessage(err, "Failed to load restaurant data."));
     } finally {
       setLoading(false);
     }
@@ -150,7 +150,7 @@ export const RestaurantPortal: React.FC<{ path: string }> = ({ path }) => {
 
   useEffect(() => {
     loadData();
-    clearForm();
+    if (path !== '/restaurant/create') clearForm();
   }, [path]);
 
   // Geolocation
@@ -214,7 +214,7 @@ export const RestaurantPortal: React.FC<{ path: string }> = ({ path }) => {
       clearForm();
       navigateTo('/restaurant/donations');
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Failed to submit donation details.");
+      setError(apiErrorMessage(err, "Failed to submit donation details."));
     } finally {
       setActionLoading(false);
     }
@@ -228,7 +228,7 @@ export const RestaurantPortal: React.FC<{ path: string }> = ({ path }) => {
       setSuccess("Donation published. It is now available for NGOs to claim!");
       loadData();
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Publishing failed.");
+      setError(apiErrorMessage(err, "Publishing failed."));
     } finally {
       setActionLoading(false);
     }
@@ -243,7 +243,7 @@ export const RestaurantPortal: React.FC<{ path: string }> = ({ path }) => {
       setSuccess("Donation cancelled successfully.");
       loadData();
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Cancellation failed.");
+      setError(apiErrorMessage(err, "Cancellation failed."));
     } finally {
       setActionLoading(false);
     }
@@ -258,7 +258,7 @@ export const RestaurantPortal: React.FC<{ path: string }> = ({ path }) => {
       setSuccess(`NGO Claim request ${approve ? 'Approved' : 'Declined'} successfully.`);
       loadData();
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Claim update failed.");
+      setError(apiErrorMessage(err, "Claim update failed."));
     } finally {
       setActionLoading(false);
     }
@@ -282,7 +282,7 @@ export const RestaurantPortal: React.FC<{ path: string }> = ({ path }) => {
         setError(response.data.message || "QR verification failed.");
       }
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Verification error.");
+      setError(apiErrorMessage(err, "Verification error."));
     } finally {
       setActionLoading(false);
     }
@@ -308,7 +308,7 @@ export const RestaurantPortal: React.FC<{ path: string }> = ({ path }) => {
       setDocFile(null);
       refreshProfile();
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Document upload failed.");
+      setError(apiErrorMessage(err, "Document upload failed."));
     } finally {
       setActionLoading(false);
     }
@@ -321,19 +321,22 @@ export const RestaurantPortal: React.FC<{ path: string }> = ({ path }) => {
     setQuantity(donation.quantity);
     setUnit(donation.unit);
     
-    // Parse datetimes to matches local datetime-local format
-    const localPrep = donation.prepared_at.slice(0, 16);
-    const localExp = donation.expires_at.slice(0, 16);
-    const localStart = donation.pickup_start.slice(0, 16);
-    const localEnd = donation.pickup_end.slice(0, 16);
+    const localInput = (value: string) => {
+      const date = new Date(value);
+      return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+    };
+    const localPrep = localInput(donation.prepared_at);
+    const localExp = localInput(donation.expires_at);
+    const localStart = localInput(donation.pickup_start);
+    const localEnd = localInput(donation.pickup_end);
     
     setPreparedAt(localPrep);
     setExpiresAt(localExp);
     setPickupStart(localStart);
     setPickupEnd(localEnd);
     setAddress(donation.address);
-    setLatitude(donation.latitude || '');
-    setLongitude(donation.longitude || '');
+    setLatitude(donation.latitude ?? '');
+    setLongitude(donation.longitude ?? '');
     setEditId(donation.id);
     navigateTo('/restaurant/create');
   };

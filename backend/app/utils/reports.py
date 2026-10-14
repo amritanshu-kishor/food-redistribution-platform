@@ -2,6 +2,7 @@ import csv
 import io
 from datetime import datetime
 from typing import List, Dict, Any
+from xml.sax.saxutils import escape
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
@@ -19,7 +20,12 @@ def generate_csv_report(data: List[Dict[str, Any]], fieldnames: List[str]) -> st
             if isinstance(v, datetime):
                 sanitized_row[k] = v.strftime("%Y-%m-%d %H:%M:%S")
             else:
-                sanitized_row[k] = str(v) if v is not None else ""
+                value = str(v) if v is not None else ""
+                # Prevent spreadsheet formula injection when an admin opens a
+                # CSV in Excel/Sheets.
+                if value.startswith(("=", "+", "-", "@")):
+                    value = "'" + value
+                sanitized_row[k] = value
         writer.writerow(sanitized_row)
     return output.getvalue()
 
@@ -89,7 +95,7 @@ def generate_pdf_report(
     )
     
     # 1. Document Title
-    story.append(Paragraph(report_title, title_style))
+    story.append(Paragraph(escape(report_title), title_style))
     story.append(Paragraph(f"Generated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC | Platform Impact Audit", subtitle_style))
     story.append(Spacer(1, 10))
     
@@ -99,8 +105,8 @@ def generate_pdf_report(
     temp_row = []
     for label, val in metrics.items():
         temp_row.extend([
-            Paragraph(f"<b>{label}:</b>", body_style),
-            Paragraph(str(val), body_style)
+            Paragraph(f"<b>{escape(str(label))}:</b>", body_style),
+            Paragraph(escape(str(val)), body_style)
         ])
         if len(temp_row) == 4:
             metric_data.append(temp_row)
@@ -128,7 +134,7 @@ def generate_pdf_report(
     
     # 3. Main Data Table
     story.append(Paragraph("Detailed Log Entries", heading_style))
-    table_content = [[Paragraph(f"<b>{h}</b>", header_style) for h in headers]]
+    table_content = [[Paragraph(f"<b>{escape(str(h))}</b>", header_style) for h in headers]]
     
     for item in items:
         row = []
@@ -138,7 +144,7 @@ def generate_pdf_report(
                 val = val.strftime('%Y-%m-%d %H:%M')
             elif val is None:
                 val = "-"
-            row.append(Paragraph(str(val), body_style))
+            row.append(Paragraph(escape(str(val)), body_style))
         table_content.append(row)
         
     # Standard column split

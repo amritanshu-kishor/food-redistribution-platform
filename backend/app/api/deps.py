@@ -1,11 +1,12 @@
+from datetime import datetime
 from typing import Generator
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.security import decode_access_token
-from app.models.models import User, UserRole, UserStatus
+from app.core.security import decode_access_token, hash_token
+from app.models.models import AuthToken, User, UserRole, UserStatus
 
 reusable_oauth2 = OAuth2PasswordBearer(
     tokenUrl=f"{settings.API_V1_STR}/auth/login"
@@ -31,10 +32,10 @@ def get_current_user(
                 detail="Could not validate credentials (missing sub)"
             )
         user_id = int(user_id_str)
-    except ValueError as e:
+    except ValueError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Token verification error: {str(e)}"
+            detail="Could not validate credentials"
         )
     except Exception:
         raise HTTPException(
@@ -45,9 +46,23 @@ def get_current_user(
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials"
         )
+    access_record = db.query(AuthToken).filter(
+        AuthToken.user_id == user.id,
+        AuthToken.token == hash_token(token),
+        AuthToken.token_type == "access",
+        AuthToken.is_revoked == False,
+        AuthToken.expires_at > datetime.utcnow(),
+    ).first()
+    if not access_record:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+        )
+    if user.status in {UserStatus.SUSPENDED, UserStatus.REJECTED, UserStatus.DEACTIVATED}:
+        raise HTTPException(status_code=403, detail="Account access is disabled. Please contact the administrator.")
     return user
 
 def get_current_active_user(

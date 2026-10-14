@@ -1,6 +1,6 @@
 import enum
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Float, Text, Enum, JSON
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Float, Text, Enum, JSON, Index, text
 from sqlalchemy.orm import relationship
 from app.core.database import Base
 
@@ -56,6 +56,15 @@ class NotificationType(str, enum.Enum):
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        Index(
+            "uq_users_single_admin",
+            "role",
+            unique=True,
+            postgresql_where=text("role = 'ADMIN'"),
+            sqlite_where=text("role = 'ADMIN'"),
+        ),
+    )
     
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True, nullable=False)

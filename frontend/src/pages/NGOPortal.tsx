@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { api, mediaUrl } from '../services/api';
+import { api, apiErrorMessage, mediaUrl } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { navigateTo } from '../services/router';
 import { Layout } from '../components/Layout';
 import { DonutChart, AreaChart } from '../components/SVGCharts';
 import { QRScanner } from '../components/QRScanner';
 import { DonationsMap } from '../components/DonationsMap';
+import { QRCodeSVG } from 'qrcode.react';
 import { 
   AlertCircle, CheckCircle, Clock, Search, X, ShieldCheck, 
   Heart, ArrowRight, Navigation, Upload, LayoutGrid, Map
@@ -18,6 +19,7 @@ interface Donation {
   image_path?: string;
   category: string;
   quantity: number;
+  available_quantity: number;
   unit: string;
   prepared_at: string;
   expires_at: string;
@@ -134,7 +136,7 @@ export const NGOPortal: React.FC<{ path: string }> = ({ path }) => {
         setAnalyticsData({ categoryPoints, timeline });
       }
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Failed to load NGO data.");
+      setError(apiErrorMessage(err, "Failed to load NGO data."));
     } finally {
       setLoading(false);
     }
@@ -148,7 +150,7 @@ export const NGOPortal: React.FC<{ path: string }> = ({ path }) => {
 
   // Haversine distance formula to calculate distance between NGO and Donation
   const calculateDistance = (lat1: number, lon1: number, lat2?: number, lon2?: number) => {
-    if (!lat2 || !lon2) return null;
+    if (lat2 == null || lon2 == null) return null;
     const R = 6371; // Radius of earth in km
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLon = (lon2 - lon1) * Math.PI / 180;
@@ -181,7 +183,7 @@ export const NGOPortal: React.FC<{ path: string }> = ({ path }) => {
       }
 
       // Distance radius filter
-      if (maxDistance !== '' && user?.organization?.latitude && user?.organization?.longitude) {
+      if (maxDistance !== '' && user?.organization?.latitude != null && user?.organization?.longitude != null) {
         const distance = calculateDistance(
           user.organization.latitude,
           user.organization.longitude,
@@ -212,7 +214,7 @@ export const NGOPortal: React.FC<{ path: string }> = ({ path }) => {
       setSelectedDonation(null);
       navigateTo('/ngo/claims');
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Failed to claim food. Check available quantities.");
+      setError(apiErrorMessage(err, "Failed to claim food. Check available quantities."));
     } finally {
       setActionLoading(false);
     }
@@ -226,7 +228,7 @@ export const NGOPortal: React.FC<{ path: string }> = ({ path }) => {
     try {
       const response = await api.post('/qr/verify', {
         scanned_code: code,
-        event_type: 'DELIVERY' // NGO completes handover to community
+        event_type: 'COMPLETION' // NGO completes distribution to the community
       });
       if (response.data.status === 'SUCCESS') {
         setSuccess("Delivery completion successfully verified!");
@@ -236,7 +238,7 @@ export const NGOPortal: React.FC<{ path: string }> = ({ path }) => {
         setError(response.data.message || "Delivery verification failed.");
       }
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Verification error.");
+      setError(apiErrorMessage(err, "Verification error."));
     } finally {
       setActionLoading(false);
     }
@@ -262,7 +264,7 @@ export const NGOPortal: React.FC<{ path: string }> = ({ path }) => {
       setDocFile(null);
       refreshProfile();
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Failed to upload document.");
+      setError(apiErrorMessage(err, "Failed to upload document."));
     } finally {
       setActionLoading(false);
     }
@@ -545,7 +547,7 @@ export const NGOPortal: React.FC<{ path: string }> = ({ path }) => {
 
                     <div className="flex flex-col gap-3 border-t border-brand-stone/40 pt-3">
                       <div className="flex justify-between text-[11px] font-bold">
-                        <span className="text-brand-charcoal">Qty: {donation.quantity} {donation.unit}</span>
+                        <span className="text-brand-charcoal">Qty: {donation.available_quantity} {donation.unit}</span>
                         <span className={isUrgent ? 'text-brand-red animate-pulse' : 'text-brand-charcoal/80'}>
                           Expires in {hoursLeft} hrs
                         </span>
@@ -617,9 +619,12 @@ export const NGOPortal: React.FC<{ path: string }> = ({ path }) => {
                     {claim.status === 'ACCEPTED' && claim.qr_token && (
                       <>
                         <span className="text-[10px] text-brand-stone-dark uppercase tracking-wider font-bold">Secure Pickup QR</span>
-                        <img
-                          src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${claim.qr_token}`}
-                          alt="Secure Pickup QR"
+                        <QRCodeSVG
+                          value={claim.qr_token}
+                          size={144}
+                          level="M"
+                          includeMargin
+                          aria-label="Secure pickup QR code"
                           className="w-36 h-36 border border-brand-stone-dark rounded p-1 bg-white"
                         />
                         <div className="text-center flex flex-col gap-0.5">
@@ -853,12 +858,12 @@ export const NGOPortal: React.FC<{ path: string }> = ({ path }) => {
             <form onSubmit={handleClaimSubmit} className="flex flex-col gap-4 mt-2">
               <div className="flex flex-col gap-1">
                 <label className="text-[10px] uppercase tracking-wider font-bold text-brand-charcoal/70">
-                  Requested Portion Quantity (Available: {selectedDonation.quantity} {selectedDonation.unit})
+                  Requested Portion Quantity (Available: {selectedDonation.available_quantity} {selectedDonation.unit})
                 </label>
                 <input
                   type="number"
                   min="0.1"
-                  max={selectedDonation.quantity}
+                  max={selectedDonation.available_quantity}
                   step="any"
                   required
                   value={requestedQty}

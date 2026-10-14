@@ -20,16 +20,23 @@ export const MapPicker: React.FC<MapPickerProps> = ({ latitude, longitude, onLoc
   const mapRef = useRef<L.Map | null>(null);
   const markerRef = useRef<L.Marker | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const onLocationChangeRef = useRef(onLocationChange);
+  const initialLatitudeRef = useRef(latitude);
+  const initialLongitudeRef = useRef(longitude);
+
+  useEffect(() => {
+    onLocationChangeRef.current = onLocationChange;
+  }, [onLocationChange]);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
-    const defaultLat = typeof latitude === 'number' ? latitude : 20.5937;
-    const defaultLon = typeof longitude === 'number' ? longitude : 78.9629;
+     const defaultLat = typeof initialLatitudeRef.current === 'number' ? initialLatitudeRef.current : 20.5937;
+     const defaultLon = typeof initialLongitudeRef.current === 'number' ? initialLongitudeRef.current : 78.9629;
 
     const map = L.map(containerRef.current, {
       center: [defaultLat, defaultLon],
-      zoom: typeof latitude === 'number' ? 14 : 5,
+       zoom: typeof initialLatitudeRef.current === 'number' ? 14 : 5,
       zoomControl: true,
     });
 
@@ -38,11 +45,11 @@ export const MapPicker: React.FC<MapPickerProps> = ({ latitude, longitude, onLoc
       maxZoom: 19,
     }).addTo(map);
 
-    if (typeof latitude === 'number' && typeof longitude === 'number') {
-      const marker = L.marker([latitude, longitude], { draggable: true }).addTo(map);
+     if (typeof initialLatitudeRef.current === 'number' && typeof initialLongitudeRef.current === 'number') {
+       const marker = L.marker([initialLatitudeRef.current, initialLongitudeRef.current], { draggable: true }).addTo(map);
       marker.on('dragend', () => {
         const pos = marker.getLatLng();
-        onLocationChange(Math.round(pos.lat * 100000) / 100000, Math.round(pos.lng * 100000) / 100000);
+         onLocationChangeRef.current(Math.round(pos.lat * 100000) / 100000, Math.round(pos.lng * 100000) / 100000);
       });
       markerRef.current = marker;
     }
@@ -56,11 +63,11 @@ export const MapPicker: React.FC<MapPickerProps> = ({ latitude, longitude, onLoc
         const marker = L.marker([rounded.lat, rounded.lng], { draggable: true }).addTo(map);
         marker.on('dragend', () => {
           const pos = marker.getLatLng();
-          onLocationChange(Math.round(pos.lat * 100000) / 100000, Math.round(pos.lng * 100000) / 100000);
+           onLocationChangeRef.current(Math.round(pos.lat * 100000) / 100000, Math.round(pos.lng * 100000) / 100000);
         });
         markerRef.current = marker;
       }
-      onLocationChange(rounded.lat, rounded.lng);
+       onLocationChangeRef.current(rounded.lat, rounded.lng);
     });
 
     mapRef.current = map;
@@ -82,7 +89,7 @@ export const MapPicker: React.FC<MapPickerProps> = ({ latitude, longitude, onLoc
         const marker = L.marker([latitude, longitude], { draggable: true }).addTo(mapRef.current);
         marker.on('dragend', () => {
           const pos = marker.getLatLng();
-          onLocationChange(Math.round(pos.lat * 100000) / 100000, Math.round(pos.lng * 100000) / 100000);
+           onLocationChangeRef.current(Math.round(pos.lat * 100000) / 100000, Math.round(pos.lng * 100000) / 100000);
         });
         markerRef.current = marker;
       }

@@ -31,6 +31,13 @@ htmlcov/
 /uploads/
 backend/uploads/
 
+# Persistent Graphify reference is tracked; local caches and generated backups are not.
+graphify-out/cache/
+graphify-out/20*/
+graphify-out/.graphify_analysis.json
+graphify-out/.graphify_root
+graphify-out/*.sig
+
 # IDE / OS files
 .vscode/
 .idea/

@@ -5,9 +5,9 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.api.deps import get_current_active_user, get_current_ngo, get_current_restaurant
 from app.crud.crud import (
-    create_allocation, accept_allocation, reject_allocation, calculate_remaining_quantity
+    create_allocation, accept_allocation, reject_allocation, calculate_remaining_available_quantity
 )
-from app.models.models import DonationAllocation, User, UserRole, Donation, AllocationStatus
+from app.models.models import Donation, DonationAllocation, User, UserRole
 from app.schemas.schemas import AllocationCreate, AllocationOut
 
 router = APIRouter()
@@ -53,6 +53,7 @@ def get_my_claims(
     for a in allocations:
         a.receiver_name = a.receiver.name
         a.donation.donor_name = a.donation.donor.name
+        a.donation.available_quantity = calculate_remaining_available_quantity(a.donation)
     return allocations
 
 @router.get("/my/incoming", response_model=List[AllocationOut])
@@ -68,6 +69,7 @@ def get_incoming_claims(
     for a in allocations:
         a.receiver_name = a.receiver.name
         a.donation.donor_name = a.donation.donor.name
+        a.donation.available_quantity = calculate_remaining_available_quantity(a.donation)
     return allocations
 
 @router.get("/{allocation_id}", response_model=AllocationOut)
@@ -92,4 +94,5 @@ def get_allocation_details(
         
     allocation.receiver_name = allocation.receiver.name
     allocation.donation.donor_name = allocation.donation.donor.name
+    allocation.donation.available_quantity = calculate_remaining_available_quantity(allocation.donation)
     return allocation

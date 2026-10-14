@@ -35,11 +35,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const logoutState = () => {
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
+    setUser(null);
+  };
+
   const fetchProfile = async () => {
     try {
       const response = await api.get('/users/profile');
       setUser(response.data);
-    } catch (error) {
+    } catch {
       // Clear token if profile fetch fails (invalid token)
       logoutState();
     } finally {
@@ -68,7 +74,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const login = async (email: string, password: string): Promise<User> => {
-    setLoading(true);
     try {
       const formData = new FormData();
       formData.append('username', email);
@@ -86,46 +91,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const profileResponse = await api.get('/users/profile');
       const loggedUser = profileResponse.data;
       setUser(loggedUser);
-      setLoading(false);
       return loggedUser;
     } catch (error: any) {
-      setLoading(false);
+      logoutState();
       throw error;
     }
-  };
-
-  const logoutState = () => {
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
-    setUser(null);
   };
 
   const logout = async () => {
     const refreshToken = localStorage.getItem('refresh_token');
     if (refreshToken) {
       try {
-        await api.post(`/auth/logout?refresh_token=${refreshToken}`);
-      } catch (error) {
-        console.error('Logout error on backend:', error);
+        await api.post('/auth/logout', { refresh_token: refreshToken });
+      } catch {
+        // Local session cleanup still completes if the server is unavailable.
       }
     }
     logoutState();
   };
 
   const register = async (data: any): Promise<void> => {
-    try {
-      await api.post('/auth/register', data);
-    } catch (error) {
-      throw error;
-    }
+    await api.post('/auth/register', data);
   };
 
   const refreshProfile = async (): Promise<void> => {
     try {
       const response = await api.get('/users/profile');
       setUser(response.data);
-    } catch (error) {
-      console.error('Failed to refresh profile:', error);
+    } catch {
     }
   };
 

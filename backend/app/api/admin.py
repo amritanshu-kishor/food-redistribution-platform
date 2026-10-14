@@ -1,8 +1,8 @@
 from typing import List, Optional
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from fastapi.responses import Response
-from sqlalchemy import func, and_
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Path
+from fastapi.responses import FileResponse, RedirectResponse, Response
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -19,6 +19,8 @@ from app.schemas.schemas import (
     UserOut, OrganizationOut, DocumentOut, AuditLogOut, ComplaintOut, ComplaintResolve
 )
 from app.utils.reports import generate_csv_report, generate_pdf_report
+from app.utils.storage import resolve_private_local_file
+from app.core.config import settings
 
 router = APIRouter()
 
@@ -27,7 +29,7 @@ def list_users(
     role: Optional[UserRole] = Query(None),
     status: Optional[UserStatus] = Query(None),
     skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1),
+    limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin)
 ):
@@ -53,7 +55,7 @@ def change_user_status(
 def list_organizations(
     verification_status: Optional[OrgVerificationStatus] = Query(None),
     skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1),
+    limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin)
 ):
@@ -79,13 +81,52 @@ def list_uploaded_documents(
     current_admin: User = Depends(get_current_admin)
 ):
     """List organization documents uploaded for verification (Admin only)."""
-    return db.query(OrganizationDocument).order_by(OrganizationDocument.uploaded_at.desc()).all()
+    return db.query(OrganizationDocument).order_by(OrganizationDocument.uploaded_at.desc()).limit(500).all()
+
+
+@router.get("/documents/{document_id}/download")
+def download_document(
+    document_id: int = Path(..., gt=0),
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin),
+):
+    """Serve verification documents only to the administrator."""
+    document = db.query(OrganizationDocument).filter(OrganizationDocument.id == document_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if settings.STORAGE_PROVIDER == "local":
+        path = resolve_private_local_file(document.file_path)
+        return FileResponse(path, media_type=document.content_type, filename=document.file_name)
+
+    # S3 objects should not be public. Return a short-lived signed URL.
+    try:
+        import boto3
+        s3_client = boto3.client(
+            "s3",
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+            region_name=settings.AWS_REGION,
+        )
+        prefix = f"https://{settings.AWS_S3_BUCKET_NAME}.s3.{settings.AWS_REGION}.amazonaws.com/"
+        if not document.file_path.startswith(prefix):
+            raise HTTPException(status_code=404, detail="Document not found")
+        key = document.file_path.removeprefix(prefix)
+        signed_url = s3_client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": settings.AWS_S3_BUCKET_NAME, "Key": key},
+            ExpiresIn=300,
+        )
+        return RedirectResponse(signed_url)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Document storage is unavailable")
 
 @router.get("/audit-logs", response_model=List[AuditLogOut])
 def list_audit_logs(
     action: Optional[str] = Query(None),
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1),
+    limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin)
 ):
